@@ -24,7 +24,7 @@ MAIN_MENU = [
     [InlineKeyboardButton("✂️ تقسيم PDF", callback_data='split')],
     [InlineKeyboardButton("🔒 تشفير PDF", callback_data='encrypt')],
     [InlineKeyboardButton("ℹ️ معلومات PDF", callback_data='info')],
-    [InlineKeyboardButton("📢 قناة البوت", url="https://t.me/BEXO50")],
+   # [InlineKeyboardButton("📢 قناة البوت", url="https://t.me/BEXO50")],
 ]
 
 async def cleanup_user_data(context: ContextTypes.DEFAULT_TYPE):
