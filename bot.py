@@ -1,34 +1,31 @@
 #!/usr/bin/env python
-import os
 import sys
-import asyncio
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from config import TOKEN
 from handlers import start, handle_callback, handle_documents, handle_photos_for_merge, handle_text, handle_done
-from spam_protection import spam_protection
 
 def main():
-    """تشغيل البوت"""
+    """تشغيل وإقلاع بوت تلجرام"""
     if not TOKEN:
-        print("❌ خطأ: الرجاء وضع توكن البوت في config.py أو متغيرات البيئة")
-        return
+        print("❌ خطأ فادح: توكن البوت غير معرّف بمتغيرات البيئة (BOT_TOKEN)!")
+        sys.exit(1)
     
-    print("✅ جاري تشغيل بوت PDF...")
+    print("🚀 جاري تهيئة خوادم معالجة مستندات الـ PDF الشاملة لعام 2026...")
     
-    # إنشاء التطبيق
+    # بناء التطبيق بالتوكن المرفق
     app = Application.builder().token(TOKEN).build()
     
-    # إضافة المعالجات
+    # ربط وتوجيه المعالجات والأحداث
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("done", handle_done))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photos_for_merge))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_documents))
+    app.add_handler(MessageHandler(filters.Document.PDF | filters.Document.ALL, handle_documents))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     
-    print("✅ البوت يعمل بنجاح! اذهب إلى تلجرام وجرب /start")
+    print("🤖 البوت يعمل بنشاح تام وفي وضع جاهزية الاستقبال الآن.")
     
-    # تشغيل البوت
+    # تشغيل البوت (Polling)
     app.run_polling()
 
 if __name__ == "__main__":
