@@ -7,6 +7,7 @@ from telegram.ext import ContextTypes
 from config import TEMP_DIR, MAX_FILE_SIZE, MAX_IMAGES_MERGE
 from utils import *
 from spam_protection import spam_protection
+from force_subscribe import require_subscription, handle_subscription_check
 
 # إعداد التسجيل
 logging.basicConfig(
@@ -17,38 +18,14 @@ logger = logging.getLogger(__name__)
 
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
-# القائمة الرئيسية
+# القائمة الرئيسية (الخدمات المتاحة فقط)
 MAIN_MENU = [
-   # [InlineKeyboardButton("🖼 صور → PDF", callback_data='img2pdf')],
-   # [InlineKeyboardButton("📝 نص → PDF", callback_data='text2pdf')],
     [InlineKeyboardButton("🔗 دمج PDF", callback_data='merge')],
- #   [InlineKeyboardButton("🖼 دمج صور مع PDF", callback_data='merge_img_pdf')],
     [InlineKeyboardButton("✂️ تقسيم PDF", callback_data='split')],
-    #[InlineKeyboardButton("🔄 إعادة ترتيب PDF", callback_data='reorder')],
-   # [InlineKeyboardButton("🗜 ضغط PDF", callback_data='compress')],
-  #  [InlineKeyboardButton("📝 استخراج نصوص", callback_data='extract')],
     [InlineKeyboardButton("🔒 تشفير PDF", callback_data='encrypt')],
     [InlineKeyboardButton("ℹ️ معلومات PDF", callback_data='info')],
+    [InlineKeyboardButton("📢 قناة البوت", url="https://t.me/BEXO50")],
 ]
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """قائمة الأوامر الرئيسية"""
-    if not await spam_protection.check(update, context):
-        return
-    
-    # تنظيف البيانات القديمة
-    await cleanup_user_data(context)
-    
-    await update.message.reply_text(
-        "🤖 *مرحباً بك في بوت PDF  *\n\n"
-        "✨ *المميزات:*\n"
-
-        "• دمج وتقسيم ملفات PDF\n"
-        "• وتشفير PDF\n"
-        "👇 *اختر الخدمة:*",
-        reply_markup=InlineKeyboardMarkup(MAIN_MENU),
-        parse_mode='Markdown'
-    )
 
 async def cleanup_user_data(context: ContextTypes.DEFAULT_TYPE):
     """تنظيف الملفات المؤقتة للمستخدم"""
@@ -83,32 +60,72 @@ async def cleanup_user_data(context: ContextTypes.DEFAULT_TYPE):
     
     user_data.clear()
 
+@require_subscription
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """قائمة الأوامر الرئيسية"""
+    if not await spam_protection.check(update, context):
+        return
+    
+    # تنظيف البيانات القديمة
+    await cleanup_user_data(context)
+    
+    await update.message.reply_text(
+        "🤖 *مرحباً بك في بوت PDF*\n\n"
+        "✨ *المميزات:*\n"
+        "• دمج ملفات PDF\n"
+        "• تقسيم ملفات PDF\n"
+        "• تشفير PDF\n"
+        "• معلومات عن PDF\n\n"
+        "👇 *اختر الخدمة:*",
+        reply_markup=InlineKeyboardMarkup(MAIN_MENU),
+        parse_mode='Markdown'
+    )
+
+@require_subscription
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """معالجة الضغط على الأزرار"""
     query = update.callback_query
+    
+    # معالجة التحقق من الاشتراك
+    if query.data == 'check_subscription':
+        await handle_subscription_check(update, context)
+        return
+    
     await query.answer()
     
     action = query.data
+    
+    # معالجة زر الرجوع
+    if action == 'back':
+        await query.edit_message_text(
+            "🤖 *مرحباً بك في بوت PDF*\n\n"
+            "👇 *اختر الخدمة:*",
+            reply_markup=InlineKeyboardMarkup(MAIN_MENU),
+            parse_mode='Markdown'
+        )
+        context.user_data.clear()
+        return
+    
     context.user_data['action'] = action
     
     messages = {
-        'img2pdf': f"📤 أرسل الصور الآن (واحدة تلو الأخرى، كحد أقصى {MAX_IMAGES_MERGE} صورة، ثم اكتب /done)",
-        'text2pdf': "📤 أرسل النص الذي تود تحويله إلى ملف PDF",
         'merge': "📤 أرسل ملفات PDF المراد دمجها (ملفاً تلو الآخر، ثم اكتب /done)",
-        'merge_img_pdf': "📤 أرسل ملف PDF أولاً، ثم سأطلب منك إرسال الصور",
         'split': "📤 أرسل ملف PDF لتقسيمه إلى صفحات منفصلة",
-        'reorder': "📤 أرسل ملف PDF لإعادة ترتيبه أولاً",
-        'compress': "📤 أرسل ملف PDF لضغطه وتقليل حجمه",
-        'extract': "📤 أرسل ملف PDF لاستخراج النصوص منه",
         'encrypt': "📤 أرسل ملف PDF المراد حمايته بكلمة مرور",
         'info': "📤 أرسل ملف PDF لعرض معلومات عنه",
     }
     
+    back_button = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 رجوع", callback_data='back')],
+        [InlineKeyboardButton("📢 قناة البوت", url="https://t.me/BEXO50")]
+    ])
+    
     await query.edit_message_text(
         messages.get(action, "أرسل الملف المطلوب"),
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 رجوع", callback_data='back')]])
+        reply_markup=back_button
     )
 
+@require_subscription
 async def handle_documents(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """معالجة الملفات المرسلة"""
     if not await spam_protection.check(update, context):
@@ -133,8 +150,8 @@ async def handle_documents(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file_name = document.file_name or "unknown.pdf"
     file_ext = Path(file_name).suffix.lower()
     
-    if action not in ['info'] and file_ext not in ['.pdf', '.jpg', '.jpeg', '.png', '.webp']:
-        await update.message.reply_text("❌ نوع الملف غير مدعوم لهذه الخدمة")
+    if file_ext != '.pdf':
+        await update.message.reply_text("❌ هذا البوت يدعم ملفات PDF فقط")
         return
     
     # تحميل الملف
@@ -160,28 +177,9 @@ async def handle_documents(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        elif action == 'merge_img_pdf':
-            context.user_data['pdf_for_merge'] = file_path
-            context.user_data['merge_images'] = []
-            await update.message.reply_text(
-                "✅ تم استلام ملف PDF\n"
-                f"📄 اسم الملف: {file_name}\n\n"
-                "📸 الآن أرسل الصور التي تريد إضافتها، ثم اكتب /done"
-            )
-            return
-        
         elif action == 'encrypt':
             context.user_data['pending_encrypt'] = file_path
             await update.message.reply_text("🔑 أرسل كلمة المرور التي تريد قفل الملف بها الآن:")
-            return
-        
-        elif action == 'reorder':
-            context.user_data['reorder_file'] = file_path
-            await update.message.reply_text(
-                "📝 أرسل ترتيب الصفحات المطلوب مفصولاً بفاصلة\n"
-                "مثال: `3,1,2,4`\n\n"
-                "✏️ يمكنك تخطي أرقام الصفحات أو تكرارها"
-            )
             return
         
         # المعالجة المباشرة
@@ -205,36 +203,6 @@ async def handle_documents(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 await update.message.reply_text(f"✅ تم تقسيم الملف إلى {len(output_files)} صفحات")
         
-        elif action == 'compress':
-            out_compressed = str(Path(file_path).with_suffix('_compressed.pdf'))
-            await compress_pdf(file_path, out_compressed)
-            
-            original_size = Path(file_path).stat().st_size
-            compressed_size = Path(out_compressed).stat().st_size
-            saved_percent = ((original_size - compressed_size) / original_size) * 100
-            
-            with open(out_compressed, 'rb') as f:
-                await update.message.reply_document(
-                    document=f,
-                    filename="Compressed_File.pdf",
-                    caption=f"✅ تم الضغط بنجاح!\n📊 تم توفير {saved_percent:.1f}% من الحجم"
-                )
-            
-            Path(out_compressed).unlink(missing_ok=True)
-        
-        elif action == 'extract':
-            extracted_text = await extract_text_from_pdf(file_path)
-            
-            if len(extracted_text) > 4000:
-                # تقسيم النص الطويل
-                for i in range(0, len(extracted_text), 4000):
-                    await update.message.reply_text(
-                        extracted_text[i:i+4000],
-                        parse_mode='Markdown'
-                    )
-            else:
-                await update.message.reply_text(extracted_text, parse_mode='Markdown')
-        
         elif action == 'info':
             info = await get_pdf_info(file_path)
             info_text = (
@@ -244,11 +212,11 @@ async def handle_documents(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"📝 اسم الملف: `{file_name}`\n"
             )
             
-            if info['metadata']:
+            if info.get('metadata'):
                 info_text += f"\n🏷️ البيانات الوصفية:\n"
                 for key, value in info['metadata'].items():
                     if value:
-                        info_text += f"• {key}: `{value[:100]}`\n"
+                        info_text += f"• {key}: `{str(value)[:100]}`\n"
             
             await update.message.reply_text(info_text, parse_mode='Markdown')
     
@@ -258,39 +226,10 @@ async def handle_documents(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     finally:
         # تنظيف الملف المؤقت
-        if Path(file_path).exists() and action not in ['merge', 'merge_img_pdf', 'encrypt', 'reorder']:
+        if Path(file_path).exists() and action not in ['merge', 'encrypt']:
             Path(file_path).unlink()
 
-async def handle_photos_for_merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """معالجة الصور لخدمات الصور"""
-    action = context.user_data.get('action')
-    
-    if action not in ['img2pdf', 'merge_img_pdf']:
-        return
-    
-    if 'merge_images' not in context.user_data:
-        context.user_data['merge_images'] = []
-    
-    # التحقق من الحد الأقصى
-    if len(context.user_data['merge_images']) >= MAX_IMAGES_MERGE:
-        await update.message.reply_text(f"⚠️ تم الوصول للحد الأقصى ({MAX_IMAGES_MERGE} صورة). اكتب /done للتنفيذ")
-        return
-    
-    # تحميل الصورة
-    photo = update.message.photo[-1]  # أفضل جودة
-    temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg", dir=TEMP_DIR)
-    img_path = temp_img.name
-    temp_img.close()
-    
-    await photo.get_file().download_to_drive(img_path)
-    context.user_data['merge_images'].append(img_path)
-    
-    count = len(context.user_data['merge_images'])
-    await update.message.reply_text(
-        f"✅ تم استلام الصورة رقم {count}\n"
-        f"📸 أرسل المزيد أو اكتب /done للتنفيذ"
-    )
-
+@require_subscription
 async def handle_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """تنفيذ العمليات المتعددة"""
     action = context.user_data.get('action')
@@ -330,66 +269,6 @@ async def handle_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             return
         
-        # تحويل الصور إلى PDF
-        elif action == 'img2pdf' and context.user_data.get('merge_images'):
-            images = context.user_data['merge_images']
-            if not images:
-                await update.message.reply_text("❌ لم تقم بإرسال أي صور بعد")
-                return
-            
-            await update.message.reply_text(f"⏳ جاري تحويل {len(images)} صورة إلى PDF...")
-            out_pdf = TEMP_DIR / "images_converted.pdf"
-            
-            try:
-                success = await images_to_pdf(images, str(out_pdf))
-                if success:
-                    with open(out_pdf, 'rb') as f:
-                        await update.message.reply_document(
-                            document=f,
-                            filename="Images_To_PDF.pdf",
-                            caption=f"✅ تم تحويل {len(images)} صورة إلى PDF"
-                        )
-                else:
-                    await update.message.reply_text("❌ فشل تحويل الصور إلى PDF")
-            finally:
-                for img in images:
-                    Path(img).unlink(missing_ok=True)
-                out_pdf.unlink(missing_ok=True)
-            
-            return
-        
-        # دمج الصور مع PDF
-        elif action == 'merge_img_pdf' and context.user_data.get('pdf_for_merge'):
-            pdf_path = context.user_data.pop('pdf_for_merge')
-            images = context.user_data.get('merge_images', [])
-            
-            if not images:
-                await update.message.reply_text("❌ لم يتم إرسال أي صور لدمجها")
-                if Path(pdf_path).exists():
-                    Path(pdf_path).unlink()
-                return
-            
-            await update.message.reply_text(f"⏳ جاري دمج {len(images)} صورة مع ملف PDF...")
-            out_mixed = TEMP_DIR / "mixed_output.pdf"
-            
-            try:
-                await merge_images_with_pdf(pdf_path, images, str(out_mixed), 'after')
-                
-                info = await get_pdf_info(str(out_mixed))
-                with open(out_mixed, 'rb') as f:
-                    await update.message.reply_document(
-                        document=f,
-                        filename="PDF_With_Images.pdf",
-                        caption=f"✅ تم دمج {len(images)} صورة مع PDF\n📄 إجمالي الصفحات: {info['pages']}"
-                    )
-            finally:
-                for img in images:
-                    Path(img).unlink(missing_ok=True)
-                Path(pdf_path).unlink(missing_ok=True)
-                out_mixed.unlink(missing_ok=True)
-            
-            return
-        
         else:
             await update.message.reply_text("⚠️ لا توجد ملفات للتنفيذ. ابدأ عملية جديدة بـ /start")
     
@@ -400,8 +279,9 @@ async def handle_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         await cleanup_user_data(context)
 
+@require_subscription
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """معالجة النصوص (كلمة المرور، ترتيب الصفحات، تحويل النص)"""
+    """معالجة النصوص (كلمة المرور)"""
     text = update.message.text
     
     # معالجة العودة للقائمة الرئيسية
@@ -416,7 +296,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if len(password) < 4:
             await update.message.reply_text("⚠️ كلمة المرور يجب أن تكون 4 أحرف على الأقل")
-            context.user_data['pending_encrypt'] = pdf_path  # إعادة الملف
+            context.user_data['pending_encrypt'] = pdf_path
             return
         
         await update.message.reply_text("🔒 جاري تشفير الملف...")
@@ -440,62 +320,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await cleanup_user_data(context)
         return
     
-    # إعادة ترتيب PDF
-    if context.user_data.get('reorder_file'):
-        pdf_path = context.user_data.pop('reorder_file')
-        order_text = text
-        
-        try:
-            # تحويل النص إلى قائمة أرقام
-            order = [int(x.strip()) for x in order_text.split(',') if x.strip().isdigit()]
-            
-            if not order:
-                raise ValueError("لم يتم إدخال أرقام صحيحة")
-            
-            await update.message.reply_text("⏳ جاري إعادة ترتيب الصفحات...")
-            out_reordered = str(Path(pdf_path).with_suffix('.reordered.pdf'))
-            
-            pages_count = await reorder_pdf(pdf_path, out_reordered, order)
-            
-            with open(out_reordered, 'rb') as f:
-                await update.message.reply_document(
-                    document=f,
-                    filename="Reordered_File.pdf",
-                    caption=f"✅ تم إعادة ترتيب {pages_count} صفحة بنجاح"
-                )
-            
-            Path(out_reordered).unlink(missing_ok=True)
-        except ValueError as e:
-            await update.message.reply_text("❌ خطأ في الصيغة. مثال صحيح: `3,1,2,4`")
-        except Exception as e:
-            await update.message.reply_text(f"❌ خطأ في المعالجة: {str(e)}")
-        finally:
-            Path(pdf_path).unlink(missing_ok=True)
-        
-        await cleanup_user_data(context)
-        return
-    
-    # تحويل النص المباشر إلى PDF
-    if context.user_data.get('action') == 'text2pdf':
-        if len(text) > 5000:
-            await update.message.reply_text("⚠️ النص طويل جداً (الحد الأقصى 5000 حرف). قم بتقصيره وحاول مرة أخرى")
-            return
-        
-        await update.message.reply_text("⏳ جاري تحويل النص إلى PDF...")
-        out_txt_pdf = TEMP_DIR / "text_document.pdf"
-        
-        try:
-            await text_to_pdf(text, str(out_txt_pdf))
-            
-            with open(out_txt_pdf, 'rb') as f:
-                await update.message.reply_document(
-                    document=f,
-                    filename="Text_Document.pdf",
-                    caption="✅ تم تحويل النص إلى PDF"
-                )
-        except Exception as e:
-            await update.message.reply_text(f"❌ فشل التحويل: {str(e)}")
-        finally:
-            out_txt_pdf.unlink(missing_ok=True)
-        
-        await cleanup_user_data(context)
+    # إذا كان النص لا يخص أي عملية
+    if context.user_data.get('action'):
+        await update.message.reply_text("❌ أمر غير معروف. استخدم /start للقائمة الرئيسية")
