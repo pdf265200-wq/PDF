@@ -9,6 +9,14 @@ class SpamProtection:
         self.limit_seconds = limit_seconds
     
     async def check(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+        # إذا كان التحديث لا يحتوي على رسالة نصية أو أمر، نتجاوز الفحص (للسماح بالـ Media Groups)
+        if not update.message or not update.message.text:
+            return True
+            
+        # السماح بكلمات المرور وترتيب الصفحات دون قيود سبام
+        if context.user_data.get('action') in ['encrypt', 'reorder']:
+            return True
+
         user_id = update.effective_user.id
         now = time.time()
         last = self.user_last_command.get(user_id, 0)
