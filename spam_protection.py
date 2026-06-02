@@ -24,4 +24,14 @@ class SpamProtection:
         
         if now - last < self.limit_seconds:
             await update.message.reply_text(
-                "
+                "⏳ *توقف قليلاً!*\n"
+                f"انتظر {self.limit_seconds} ثانية قبل إرسال أمر جديد.",
+                parse_mode='Markdown'
+            )
+            return False
+        
+        self.user_last_command[user_id] = now
+        return True
+
+# إنشاء نسخة عامة
+spam_protection = SpamProtection()
