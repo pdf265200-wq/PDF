@@ -2,7 +2,6 @@ import os
 import sys
 import tempfile
 import time
-import asyncio
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
@@ -20,7 +19,6 @@ TOKEN = os.environ.get('BOT_TOKEN')
 # التحقق من التوكن
 if not TOKEN:
     print("❌ خطأ: BOT_TOKEN غير موجود")
-    print("الرجاء إضافة BOT_TOKEN في متغيرات البيئة على Railway")
     sys.exit(1)
 
 # حماية السبام
@@ -36,17 +34,18 @@ def check_spam(user_id):
     return True
 
 # وظائف PDF
-async def images_to_pdf(image_path, output_path):
+def images_to_pdf(image_path, output_path):
     try:
         img = Image.open(image_path)
         if img.mode == 'RGBA':
             img = img.convert('RGB')
         img.save(output_path, 'PDF')
         return True
-    except:
+    except Exception as e:
+        print(f"Error in images_to_pdf: {e}")
         return False
 
-async def text_to_pdf(text, output_path):
+def text_to_pdf(text, output_path):
     c = canvas.Canvas(output_path, pagesize=A4)
     y = 750
     for line in text.split('\n')[:40]:
@@ -54,7 +53,7 @@ async def text_to_pdf(text, output_path):
         y -= 20
     c.save()
 
-async def split_pdf(pdf_path, output_dir):
+def split_pdf(pdf_path, output_dir):
     reader = PdfReader(pdf_path)
     files = []
     for i, page in enumerate(reader.pages):
@@ -66,7 +65,7 @@ async def split_pdf(pdf_path, output_dir):
         files.append(out)
     return files
 
-async def compress_pdf(input_path, output_path):
+def compress_pdf(input_path, output_path):
     reader = PdfReader(input_path)
     writer = PdfWriter()
     for page in reader.pages:
@@ -75,7 +74,7 @@ async def compress_pdf(input_path, output_path):
     with open(output_path, 'wb') as f:
         writer.write(f)
 
-async def encrypt_pdf(input_path, output_path, password):
+def encrypt_pdf(input_path, output_path, password):
     reader = PdfReader(input_path)
     writer = PdfWriter()
     for page in reader.pages:
@@ -86,7 +85,8 @@ async def encrypt_pdf(input_path, output_path, password):
 
 # معالجات البوت
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not check_spam(update.effective_user.id):
+    user_id = update.effective_user.id
+    if not check_spam(user_id):
         await update.message.reply_text("⏳ انتظر قليلاً")
         return
     
@@ -119,7 +119,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(messages.get(query.data, "أرسل الملف"))
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not check_spam(update.effective_user.id):
+    user_id = update.effective_user.id
+    if not check_spam(user_id):
         return
     
     if context.user_data.get('action') != 'img2pdf':
@@ -128,13 +129,16 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text("⏳ جاري التحويل...")
     
+    temp_img = None
+    temp_pdf = None
+    
     try:
         photo = update.message.photo[-1]
         temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
         await photo.get_file().download_to_drive(temp_img.name)
         
         temp_pdf = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-        success = await images_to_pdf(temp_img.name, temp_pdf.name)
+        success = images_to_pdf(temp_img.name, temp_pdf.name)
         
         if success:
             with open(temp_pdf.name, 'rb') as f:
@@ -143,15 +147,19 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text("❌ فشل التحويل")
         
-        os.unlink(temp_pdf.name)
-        os.unlink(temp_img.name)
     except Exception as e:
         await update.message.reply_text(f"❌ خطأ: {str(e)}")
+    finally:
+        if temp_img and os.path.exists(temp_img.name):
+            os.unlink(temp_img.name)
+        if temp_pdf and os.path.exists(temp_pdf.name):
+            os.unlink(temp_pdf.name)
     
     context.user_data['action'] = None
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not check_spam(update.effective_user.id):
+    user_id = update.effective_user.id
+    if not check_spam(user_id):
         return
     
     action = context.user_data.get('action')
@@ -166,13 +174,15 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text("⏳ جاري المعالجة...")
     
-    temp_input = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-    await doc.get_file().download_to_drive(temp_input.name)
+    temp_input = None
     
     try:
+        temp_input = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+        await doc.get_file().download_to_drive(temp_input.name)
+        
         if action == 'split':
             output_dir = tempfile.mkdtemp()
-            files = await split_pdf(temp_input.name, output_dir)
+            files = split_pdf(temp_input.name, output_dir)
             for f in files:
                 with open(f, 'rb') as file:
                     await update.message.reply_document(document=file, filename=os.path.basename(f))
@@ -180,7 +190,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         elif action == 'compress':
             temp_output = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-            await compress_pdf(temp_input.name, temp_output.name)
+            compress_pdf(temp_input.name, temp_output.name)
             with open(temp_output.name, 'rb') as f:
                 await update.message.reply_document(document=f, filename="compressed.pdf")
             await update.message.reply_text("✅ تم الضغط!")
@@ -191,10 +201,11 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("🔑 أرسل كلمة المرور:")
             return
         
-        os.unlink(temp_input.name)
-        
     except Exception as e:
         await update.message.reply_text(f"❌ خطأ: {str(e)}")
+    
+    if temp_input and os.path.exists(temp_input.name) and action != 'encrypt':
+        os.unlink(temp_input.name)
     
     context.user_data['action'] = None
 
@@ -204,39 +215,50 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pdf_path = context.user_data.pop('encrypt_file')
         password = update.message.text
         
+        temp_output = None
+        
         try:
             temp_output = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-            await encrypt_pdf(pdf_path, temp_output.name, password)
+            encrypt_pdf(pdf_path, temp_output.name, password)
             
             with open(temp_output.name, 'rb') as f:
                 await update.message.reply_document(document=f, filename="encrypted.pdf")
             
             await update.message.reply_text("✅ تم التشفير!")
-            os.unlink(temp_output.name)
-            os.unlink(pdf_path)
+            
         except Exception as e:
             await update.message.reply_text(f"❌ خطأ: {str(e)}")
+        finally:
+            if temp_output and os.path.exists(temp_output.name):
+                os.unlink(temp_output.name)
+            if os.path.exists(pdf_path):
+                os.unlink(pdf_path)
         
         context.user_data['action'] = None
     
     # معالجة تحويل النص
     elif context.user_data.get('action') == 'text2pdf':
         text = update.message.text
+        temp_pdf = None
+        
         try:
             temp_pdf = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-            await text_to_pdf(text, temp_pdf.name)
+            text_to_pdf(text, temp_pdf.name)
             
             with open(temp_pdf.name, 'rb') as f:
                 await update.message.reply_document(document=f, filename="text.pdf")
             
             await update.message.reply_text("✅ تم تحويل النص إلى PDF!")
-            os.unlink(temp_pdf.name)
+            
         except Exception as e:
             await update.message.reply_text(f"❌ خطأ: {str(e)}")
+        finally:
+            if temp_pdf and os.path.exists(temp_pdf.name):
+                os.unlink(temp_pdf.name)
         
         context.user_data['action'] = None
 
-async def main():
+def main():
     print("✅ تشغيل البوت...")
     app = Application.builder().token(TOKEN).build()
     
@@ -247,7 +269,7 @@ async def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     
     print("✅ البوت يعمل بنجاح!")
-    await app.run_polling()
+    app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
