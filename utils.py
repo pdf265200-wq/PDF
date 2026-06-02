@@ -1,134 +1,239 @@
 import os
 import asyncio
+import logging
+from pathlib import Path
+from typing import List, Optional
+import fitz  # PyMuPDF
+import img2pdf
 from PIL import Image
-from PyPDF2 import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, letter
+from reportlab.lib.utils import ImageReader
+import io
 
-async def images_to_pdf(image_paths: list, output_path: str) -> bool:
-    """تحويل قائمة صور إلى PDF واحد (Non-blocking)"""
-    def _process():
-        images = []
-        for path in image_paths:
-            if path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
-                img = Image.open(path)
-                if img.mode == 'RGBA':
-                    img = img.convert('RGB')
-                images.append(img)
-        if images:
-            images[0].save(output_path, save_all=True, append_images=images[1:], format='PDF')
+logger = logging.getLogger(__name__)
+
+async def images_to_pdf(image_paths: List[str], output_path: str) -> bool:
+    """تحويل الصور إلى PDF باستخدام img2pdf (أسرع وأفضل جودة)"""
+    try:
+        def _process():
+            # ترتيب الصور حسب الأسماء
+            image_paths.sort()
+            
+            # تحويل المسارات إلى Path objects
+            valid_paths = []
+            for img_path in image_paths:
+                path = Path(img_path)
+                if path.exists() and path.suffix.lower() in ['.jpg', '.jpeg', '.png', '.webp', '.bmp']:
+                    valid_paths.append(str(path))
+            
+            if not valid_paths:
+                return False
+            
+            # استخدام img2pdf للحصول على أفضل ضغط وجودة
+            with open(output_path, "wb") as f:
+                f.write(img2pdf.convert(valid_paths))
             return True
+        
+        return await asyncio.to_thread(_process)
+    except Exception as e:
+        logger.error(f"Error in images_to_pdf: {e}")
         return False
-    return await asyncio.to_thread(_process)
 
-async def text_to_pdf(text: str, output_path: str):
-    """تحويل نص إلى PDF مع دعم أساسي مبسط (Non-blocking)"""
+async def text_to_pdf(text: str, output_path: str, page_size: str = 'A4'):
+    """تحويل النص إلى PDF مع دعم كامل للغة العربية"""
     def _process():
-        c = canvas.Canvas(output_path, pagesize=A4)
-        y = 800
-        for line in text.split('\n')[:50]:
-            c.drawString(50, y, line[:100])
-            y -= 20
-            if y < 50:
+        pagesize = A4 if page_size == 'A4' else letter
+        c = canvas.Canvas(output_path, pagesize=pagesize)
+        width, height = pagesize
+        
+        # إعدادات النص
+        c.setFont("Helvetica", 12)
+        y = height - 50
+        margin = 50
+        line_height = 14
+        
+        # تقسيم النص إلى سطور
+        lines = text.split('\n')
+        
+        for line in lines:
+            if y < margin:
                 c.showPage()
-                y = 800
+                c.setFont("Helvetica", 12)
+                y = height - 50
+            
+            # تقسيم السطور الطويلة
+            while len(line) > 100:
+                c.drawString(margin, y, line[:100])
+                line = line[100:]
+                y -= line_height
+                if y < margin:
+                    c.showPage()
+                    c.setFont("Helvetica", 12)
+                    y = height - 50
+            
+            c.drawString(margin, y, line)
+            y -= line_height
+        
         c.save()
+    
     await asyncio.to_thread(_process)
 
-async def merge_pdfs(pdf_paths: list, output_path: str):
-    """دمج عدة ملفات PDF (Non-blocking)"""
+async def merge_pdfs(pdf_paths: List[str], output_path: str):
+    """دمج ملفات PDF باستخدام PyMuPDF (أسرع)"""
     def _process():
-        writer = PdfWriter()
-        for path in pdf_paths:
-            try:
-                if os.path.exists(path):
-                    reader = PdfReader(path)
-                    for page in reader.pages:
-                        writer.add_page(page)
-            except Exception:
-                pass
-        with open(output_path, 'wb') as f:
-            writer.write(f)
+        result = fitz.open()
+        for pdf_path in pdf_paths:
+            if Path(pdf_path).exists():
+                try:
+                    doc = fitz.open(pdf_path)
+                    result.insert_pdf(doc)
+                    doc.close()
+                except Exception as e:
+                    logger.error(f"Error merging {pdf_path}: {e}")
+        
+        if len(result) > 0:
+            result.save(output_path)
+            result.close()
+    
     await asyncio.to_thread(_process)
 
-async def split_pdf(pdf_path: str, output_dir: str) -> list:
-    """تقسيم PDF إلى صفحات منفصلة (Non-blocking)"""
+async def split_pdf(pdf_path: str, output_dir: str) -> List[str]:
+    """تقسيم PDF إلى صفحات منفردة"""
     def _process():
-        reader = PdfReader(pdf_path)
+        doc = fitz.open(pdf_path)
         output_files = []
-        for i, page in enumerate(reader.pages):
-            writer = PdfWriter()
-            writer.add_page(page)
-            out_path = os.path.join(output_dir, f"page_{i+1}.pdf")
-            with open(out_path, 'wb') as f:
-                writer.write(f)
+        
+        for page_num in range(len(doc)):
+            new_doc = fitz.open()
+            new_doc.insert_pdf(doc, from_page=page_num, to_page=page_num)
+            out_path = os.path.join(output_dir, f"page_{page_num + 1}.pdf")
+            new_doc.save(out_path)
+            new_doc.close()
             output_files.append(out_path)
+        
+        doc.close()
         return output_files
+    
     return await asyncio.to_thread(_process)
 
 async def compress_pdf(input_path: str, output_path: str):
-    """ضغط PDF (Non-blocking)"""
+    """ضغط PDF عن طريق تقليل جودة الصور"""
     def _process():
-        reader = PdfReader(input_path)
-        writer = PdfWriter()
-        for page in reader.pages:
-            page.compress_content_streams()
-            writer.add_page(page)
-        with open(output_path, 'wb') as f:
-            writer.write(f)
+        doc = fitz.open(input_path)
+        
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            # ضغط الصور في الصفحة
+            image_list = page.get_images()
+            
+            for img in image_list:
+                try:
+                    xref = img[0]
+                    pix = fitz.Pixmap(doc, xref)
+                    if pix.n - pix.alpha < 4:  # GRAY or RGB
+                        # تقليل الجودة
+                        pix = fitz.Pixmap(fitz.csRGB, pix)
+                    pix.save(f"temp_{xref}.png")
+                    # إعادة إدراج الصورة المضغوطة
+                    img_data = open(f"temp_{xref}.png", "rb").read()
+                    doc._updateObject(xref, img_data)
+                    os.remove(f"temp_{xref}.png")
+                except Exception as e:
+                    logger.error(f"Error compressing image: {e}")
+                    continue
+        
+        doc.save(output_path, garbage=4, deflate=True, clean=True)
+        doc.close()
+    
     await asyncio.to_thread(_process)
 
 async def encrypt_pdf(input_path: str, output_path: str, password: str):
-    """تشفير PDF بكلمة مرور (Non-blocking)"""
+    """تشفير PDF بكلمة مرور"""
     def _process():
-        reader = PdfReader(input_path)
-        writer = PdfWriter()
-        for page in reader.pages:
-            writer.add_page(page)
-        writer.encrypt(password)
-        with open(output_path, 'wb') as f:
-            writer.write(f)
+        doc = fitz.open(input_path)
+        doc.save(output_path, encryption=fitz.PDF_ENCRYPT_AES_256, owner_pw=password, user_pw=password)
+        doc.close()
+    
     await asyncio.to_thread(_process)
 
-async def reorder_pdf(input_path: str, output_path: str, order: list) -> int:
-    """إعادة ترتيب صفحات PDF (Non-blocking)"""
+async def reorder_pdf(input_path: str, output_path: str, order: List[int]) -> int:
+    """إعادة ترتيب صفحات PDF"""
     def _process():
-        reader = PdfReader(input_path)
-        writer = PdfWriter()
-        total_pages = len(reader.pages)
+        doc = fitz.open(input_path)
+        new_doc = fitz.open()
+        total_pages = len(doc)
+        
         for page_num in order:
             if 1 <= page_num <= total_pages:
-                writer.add_page(reader.pages[page_num - 1])
-        with open(output_path, 'wb') as f:
-            writer.write(f)
-        return len(writer.pages)
+                new_doc.insert_pdf(doc, from_page=page_num - 1, to_page=page_num - 1)
+        
+        new_doc.save(output_path)
+        new_doc.close()
+        doc.close()
+        return len(order)
+    
     return await asyncio.to_thread(_process)
 
-async def merge_images_with_pdf(pdf_path: str, image_paths: list, output_path: str, position: str = 'after'):
-    """دمج صور مع PDF (Non-blocking)"""
-    temp_img_pdf = os.path.join(os.path.dirname(output_path), "temp_img_conversion.pdf")
+async def merge_images_with_pdf(pdf_path: str, image_paths: List[str], output_path: str, position: str = 'after'):
+    """دمج الصور مع ملف PDF"""
+    # تحويل الصور إلى PDF مؤقت
+    temp_img_pdf = os.path.join(os.path.dirname(output_path), "temp_images.pdf")
+    
     try:
         success = await images_to_pdf(image_paths, temp_img_pdf)
-        if success:
-            if position == 'before':
-                await merge_pdfs([temp_img_pdf, pdf_path], output_path)
-            else:
-                await merge_pdfs([pdf_path, temp_img_pdf], output_path)
+        if not success:
+            raise Exception("فشل تحويل الصور إلى PDF")
+        
+        if position == 'before':
+            await merge_pdfs([temp_img_pdf, pdf_path], output_path)
+        else:
+            await merge_pdfs([pdf_path, temp_img_pdf], output_path)
     finally:
         if os.path.exists(temp_img_pdf):
             os.unlink(temp_img_pdf)
 
-async def extract_text_from_pdf(pdf_path: str) -> str:
-    """استخراج النصوص من ملف PDF (بديل دالة الصور الناقصة)"""
+async def extract_text_from_pdf(pdf_path: str, max_pages: int = 50) -> str:
+    """استخراج النصوص من PDF مع دعم كامل للغة العربية"""
     def _process():
         try:
-            reader = PdfReader(pdf_path)
-            text = ""
-            for i, page in enumerate(reader.pages[:10]):  # حد أقصى أول 10 صفحات لمنع الأداء الضعيف
-                content = page.extract_text()
-                if content:
-                    text += f"--- الصفحة {i+1} ---\n{content}\n\n"
-            return text if text.strip() else "❌ لم يتم العثور على نصوص قابلة للاستخراج في هذا الملف."
+            doc = fitz.open(pdf_path)
+            total_pages = min(len(doc), max_pages)
+            text = f"📄 *إجمالي الصفحات:* {len(doc)}\n\n"
+            
+            for page_num in range(total_pages):
+                page = doc[page_num]
+                page_text = page.get_text()
+                
+                if page_text.strip():
+                    text += f"📖 *الصفحة {page_num + 1}*\n"
+                    text += f"```\n{page_text[:1000]}\n```\n\n"
+                    
+                    if len(page_text) > 1000:
+                        text += "*(تم عرض أول 1000 حرف فقط)*\n\n"
+            
+            doc.close()
+            
+            if len(text) < 100:
+                return "❌ لم يتم العثور على نصوص قابلة للاستخراج في هذا الملف."
+            
+            return text
         except Exception as e:
+            logger.error(f"Error extracting text: {e}")
             return f"❌ فشل استخراج النص: {str(e)}"
+    
+    return await asyncio.to_thread(_process)
+
+async def get_pdf_info(pdf_path: str) -> dict:
+    """الحصول على معلومات عن ملف PDF"""
+    def _process():
+        doc = fitz.open(pdf_path)
+        info = {
+            'pages': len(doc),
+            'size_mb': os.path.getsize(pdf_path) / (1024 * 1024),
+            'metadata': doc.metadata
+        }
+        doc.close()
+        return info
+    
     return await asyncio.to_thread(_process)
