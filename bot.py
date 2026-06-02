@@ -1,32 +1,50 @@
 #!/usr/bin/env python
 import sys
+import logging
+from pathlib import Path
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
-from config import TOKEN
+from config import TOKEN, LOG_DIR
 from handlers import start, handle_callback, handle_documents, handle_photos_for_merge, handle_text, handle_done
 
+# إعداد التسجيل المتقدم
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO,
+    handlers=[
+        logging.FileHandler(LOG_DIR / 'bot.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
 def main():
-    """تشغيل وإقلاع بوت تلجرام"""
+    """تشغيل البوت"""
     if not TOKEN:
-        print("❌ خطأ فادح: توكن البوت غير معرّف بمتغيرات البيئة (BOT_TOKEN)!")
+        logger.error("❌ توكن البوت غير موجود في متغيرات البيئة!")
         sys.exit(1)
     
-    print("🚀 جاري تهيئة خوادم معالجة مستندات الـ PDF الشاملة لعام 2026...")
+    logger.info("🚀 جاري تشغيل بوت PDF الشامل 2026...")
     
-    # بناء التطبيق بالتوكن المرفق
-    app = Application.builder().token(TOKEN).build()
+    try:
+        # بناء التطبيق
+        app = Application.builder().token(TOKEN).build()
+        
+        # إضافة المعالجات
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CommandHandler("done", handle_done))
+        app.add_handler(CallbackQueryHandler(handle_callback))
+        app.add_handler(MessageHandler(filters.PHOTO, handle_photos_for_merge))
+        app.add_handler(MessageHandler(filters.Document.ALL, handle_documents))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+        
+        logger.info("✅ البوت جاهز للعمل!")
+        
+        # تشغيل البوت
+        app.run_polling(drop_pending_updates=True)
     
-    # ربط وتوجيه المعالجات والأحداث
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("done", handle_done))
-    app.add_handler(CallbackQueryHandler(handle_callback))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photos_for_merge))
-    app.add_handler(MessageHandler(filters.Document.PDF | filters.Document.ALL, handle_documents))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    
-    print("🤖 البوت يعمل بنشاح تام وفي وضع جاهزية الاستقبال الآن.")
-    
-    # تشغيل البوت (Polling)
-    app.run_polling()
+    except Exception as e:
+        logger.error(f"❌ فشل تشغيل البوت: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
