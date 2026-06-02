@@ -4,6 +4,11 @@ from pathlib import Path
 # ⚠️ يتم جلب التوكن من متغيرات البيئة
 TOKEN = os.environ.get('BOT_TOKEN', '')
 
+# إعدادات الاشتراك الإجباري
+FORCE_SUBSCRIBE_CHANNEL = "@BEXO50"
+FORCE_SUBSCRIBE_CHANNEL_ID = os.environ.get('FORCE_SUBSCRIBE_CHANNEL_ID', None)
+ENABLE_FORCE_SUBSCRIBE = os.environ.get('ENABLE_FORCE_SUBSCRIBE', 'True').lower() == 'true'
+
 # إعدادات الحماية المتقدمة
 SPAM_LIMIT_SECONDS = 2
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 ميجابايت
