@@ -6,7 +6,6 @@ from config import TEMP_DIR
 from utils import *
 from spam_protection import spam_protection
 
-# إنشاء المجلد المؤقت إذا لم يكن موجوداً
 os.makedirs(TEMP_DIR, exist_ok=True)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -22,13 +21,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("✂️ تقسيم PDF", callback_data='split')],
         [InlineKeyboardButton("🔄 إعادة ترتيب PDF", callback_data='reorder')],
         [InlineKeyboardButton("🗜 ضغط PDF", callback_data='compress')],
-        [InlineKeyboardButton("🖼 استخراج صور", callback_data='extract')],
+        [InlineKeyboardButton("📝 استخراج نصوص", callback_data='extract')],
         [InlineKeyboardButton("🔒 تشفير PDF", callback_data='encrypt')],
     ]
     
+    # تصفير البيانات عند البدء الجديد لتفادي تداخل العمليات
+    context.user_data.clear()
+    
     await update.message.reply_text(
-        "🤖 *مرحباً بك في بوت PDF الشامل*\n\n"
-        "اختر الخدمة التي تريدها:",
+        "🤖 *مرحباً بك في بوت PDF الشامل لعام 2026*\n\n"
+        "اختر الخدمة التي تريدها من الأزرار أدناه:",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='Markdown'
     )
@@ -42,15 +44,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['action'] = action
     
     messages = {
-        'img2pdf': "📤 أرسل الصور (يمكنك إرسال عدة صور دفعة واحدة)",
-        'text2pdf': "📤 أرسل النص",
+        'img2pdf': "📤 أرسل الصور الآن (واحدة تلو الأخرى، ثم اكتب /done عند الانتهاء)",
+        'text2pdf': "📤 أرسل النص الذي تود تحويله إلى ملف PDF",
         'merge': "📤 أرسل ملفات PDF المراد دمجها (واحداً تلو الآخر، ثم اكتب /done)",
-        'merge_img_pdf': "📤 أرسل ملف PDF أولاً، ثم أرسل الصور",
-        'split': "📤 أرسل ملف PDF لتقسيمه",
-        'reorder': "📤 أرسل ملف PDF لإعادة ترتيبه ثم أرسل الأرقام (مثال: 3,1,2,4)",
-        'compress': "📤 أرسل ملف PDF لضغطه",
-        'extract': "📤 أرسل ملف PDF لاستخراج النص منه",
-        'encrypt': "📤 أرسل ملف PDF ثم سأطلب منك كلمة المرور",
+        'merge_img_pdf': "📤 أرسل ملف PDF أولاً، ثم سأطلب منك إرسال الصور",
+        'split': "📤 أرسل ملف PDF لتقسيمه إلى صفحات منفصلة",
+        'reorder': "📤 أرسل ملف PDF لإعادة ترتيبه أولاً",
+        'compress': "📤 أرسل ملف PDF لضغطه وتقليل حجمه",
+        'extract': "📤 أرسل ملف PDF لاستخراج النصوص الرقمية منه",
+        'encrypt': "📤 أرسل ملف PDF المراد حمايته بكلمة مرور",
     }
     
     await query.edit_message_text(messages.get(action, "أرسل الملف المطلوب"))
@@ -62,7 +64,7 @@ async def handle_documents(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     action = context.user_data.get('action')
     if not action:
-        await update.message.reply_text("⚠️ الرجاء اختيار خدمة أولاً من /start")
+        await update.message.reply_text("⚠️ الرجاء اختيار خدمة أولاً من القائمة /start")
         return
     
     document = update.message.document
@@ -70,183 +72,197 @@ async def handle_documents(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ يرجى إرسال ملف صالح")
         return
     
-    # تحميل الملف
-    file_ext = document.file_name.split('.')[-1].lower()
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_ext}")
+    # تحميل وتخزين الملف بأمان
+    file_ext = document.file_name.split('.')[-1].lower() if document.file_name else 'pdf'
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_ext}", dir=TEMP_DIR)
     file_path = temp_file.name
+    temp_file.close()
+    
     file_obj = await document.get_file()
     await file_obj.download_to_drive(file_path)
     
-    # معالجة دمج الصور مع PDF (تحتاج تخزين PDF أولاً)
+    # [إصلاح الثغرة المنطقية للدمج المتعدد]
+    if action == 'merge':
+        if 'merge_files' not in context.user_data:
+            context.user_data['merge_files'] = []
+        context.user_data['merge_files'].append(file_path)
+        await update.message.reply_text(f"✅ تم استلام ملف PDF رقم {len(context.user_data['merge_files'])}. أرسل ملفاً آخر أو اكتب /done للدمج.")
+        return
+
     if action == 'merge_img_pdf':
         context.user_data['pdf_for_merge'] = file_path
         context.user_data['merge_images'] = []
-        await update.message.reply_text("✅ تم استلام PDF. الآن أرسل الصور (أرسلها واحدة تلو الأخرى، ثم اكتب /done)")
+        await update.message.reply_text("✅ تم استلام ملف PDF. الآن أرسل الصور التي تريد إضافتها إليه، ثم اكتب /done")
         return
     
-    # إنشاء مجلد مؤقت للنتائج
-    with tempfile.TemporaryDirectory() as temp_dir:
+    if action == 'encrypt':
+        context.user_data['pending_encrypt'] = file_path
+        await update.message.reply_text("🔑 أرسل كلمة المرور التي تريد قفل الملف بها الآن:")
+        return
         
-        if action == 'split':
-            output_files = await split_pdf(file_path, temp_dir)
-            for out_file in output_files:
-                with open(out_file, 'rb') as f:
-                    await update.message.reply_document(
-                        document=f,
-                        filename=os.path.basename(out_file)
-                    )
-            await update.message.reply_text(f"✅ تم التقسيم إلى {len(output_files)} صفحات")
-        
-        elif action == 'compress':
-            output_path = os.path.join(temp_dir, "compressed.pdf")
-            await compress_pdf(file_path, output_path)
-            with open(output_path, 'rb') as f:
-                await update.message.reply_document(document=f, filename="compressed.pdf")
-            await update.message.reply_text("✅ تم ضغط الملف")
-        
-        elif action == 'encrypt':
-            context.user_data['pending_encrypt'] = file_path
-            await update.message.reply_text("🔑 أرسل كلمة المرور لتشفير الملف:")
-            return
-        
-        elif action == 'reorder':
-            context.user_data['reorder_file'] = file_path
-            await update.message.reply_text(
-                "📝 أرسل ترتيب الصفحات المطلوب\n"
-                "مثال: 3,1,2,4\n"
-                "(يعني: الصفحة 3 ثم 1 ثم 2 ثم 4)"
-            )
-            return
-        
-        else:
-            await update.message.reply_text("⏳ جاري المعالجة...")
+    if action == 'reorder':
+        context.user_data['reorder_file'] = file_path
+        await update.message.reply_text("📝 أرسل ترتيب الصفحات المطلوب مفصولاً بفاصلة\nمثال: `3,1,2,4`")
+        return
+
+    # معالجة فورية للميزات المباشرة لحماية الذاكرة والمجلدات المؤقتة
+    await update.message.reply_text("⏳ جاري معالجة طلبك، يرجى الانتظار...")
     
-    # تنظيف الملف المؤقت إذا لم يكن في انتظار
-    if action not in ['encrypt', 'reorder', 'merge_img_pdf']:
+    try:
+        if action == 'split':
+            with tempfile.TemporaryDirectory(dir=TEMP_DIR) as temp_dir:
+                output_files = await split_pdf(file_path, temp_dir)
+                for out_file in output_files:
+                    with open(out_file, 'rb') as f:
+                        await update.message.reply_document(document=f, filename=os.path.basename(out_file))
+                await update.message.reply_text(f"✅ تم تقسيم الملف إلى {len(output_files)} صفحات بنجاح.")
+                
+        elif action == 'compress':
+            out_compressed = file_path + "_comp.pdf"
+            await compress_pdf(file_path, out_compressed)
+            with open(out_compressed, 'rb') as f:
+                await update.message.reply_document(document=f, filename="Compressed_File.pdf")
+            if os.path.exists(out_compressed): os.unlink(out_compressed)
+            await update.message.reply_text("✅ تم ضغط وتخفيض حجم الملف بنجاح.")
+            
+        elif action == 'extract':
+            extracted_text = await extract_text_from_pdf(file_path)
+            await update.message.reply_text(extracted_text)
+    except Exception as e:
+        await update.message.reply_text(f"❌ حدث خطأ أثناء المعالجة: {str(e)}")
+    finally:
         if os.path.exists(file_path):
             os.unlink(file_path)
 
 async def handle_photos_for_merge(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """معالجة الصور لدمجها مع PDF"""
-    if context.user_data.get('action') != 'merge_img_pdf':
+    """معالجة الصور لخدمات (img2pdf) و (merge_img_pdf)"""
+    action = context.user_data.get('action')
+    if action not in ['img2pdf', 'merge_img_pdf']:
         return
-    
+        
     if 'merge_images' not in context.user_data:
         context.user_data['merge_images'] = []
-    
+        
     photo = update.message.photo[-1]
-    temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
-    await photo.get_file().download_to_drive(temp_img.name)
-    context.user_data['merge_images'].append(temp_img.name)
+    temp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg", dir=TEMP_DIR)
+    img_path = temp_img.name
+    temp_img.close()
     
-    await update.message.reply_text(f"✅ تم استلام الصورة {len(context.user_data['merge_images'])}. أرسل المزيد أو /done")
-
-async def handle_reorder_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """معالجة ترتيب الصفحات"""
-    if 'reorder_file' not in context.user_data:
-        return
+    await photo.get_file().download_to_drive(img_path)
+    context.user_data['merge_images'].append(img_path)
     
-    pdf_path = context.user_data.pop('reorder_file')
-    order_text = update.message.text
-    
-    try:
-        # تحويل النص إلى قائمة أرقام
-        order = [int(x.strip()) for x in order_text.split(',')]
-        
-        with tempfile.TemporaryDirectory() as temp_dir:
-            output_path = os.path.join(temp_dir, "reordered.pdf")
-            pages_count = await reorder_pdf(pdf_path, output_path, order)
-            
-            with open(output_path, 'rb') as f:
-                await update.message.reply_document(document=f, filename="reordered.pdf")
-            
-            await update.message.reply_text(f"✅ تم إعادة ترتيب {pages_count} صفحة بنجاح")
-        
-        os.unlink(pdf_path)
-        
-    except Exception as e:
-        await update.message.reply_text(f"❌ خطأ: {str(e)}\nالرجاء إرسال الأرقام بشكل صحيح (مثال: 3,1,2,4)")
+    await update.message.reply_text(f"✅ تم استقبال الصورة رقم {len(context.user_data['merge_images'])}. أرسل المزيد أو اكتب /done للتنفيذ.")
 
 async def handle_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """إنهاء تجميع الملفات"""
+    """إقفال وتجميع العمليات المتعددة"""
     action = context.user_data.get('action')
     
     if action == 'merge' and 'merge_files' in context.user_data:
         files = context.user_data['merge_files']
         if len(files) >= 2:
-            with tempfile.TemporaryDirectory() as temp_dir:
-                output_path = os.path.join(temp_dir, "merged.pdf")
-                await merge_pdfs(files, output_path)
-                with open(output_path, 'rb') as f:
-                    await update.message.reply_document(document=f, filename="merged.pdf")
-                await update.message.reply_text(f"✅ تم دمج {len(files)} ملفات")
-            
-            # تنظيف الملفات المؤقتة
-            for f in files:
-                try:
-                    os.unlink(f)
-                except:
-                    pass
-            context.user_data['merge_files'] = []
+            await update.message.reply_text("⏳ جاري دمج ملفات PDF...")
+            out_merged = os.path.join(TEMP_DIR, "merged_final.pdf")
+            try:
+                await merge_pdfs(files, out_merged)
+                with open(out_merged, 'rb') as f:
+                    await update.message.reply_document(document=f, filename="Merged_Document.pdf")
+            finally:
+                for f in files: 
+                    if os.path.exists(f): os.unlink(f)
+                if os.path.exists(out_merged): os.unlink(out_merged)
+            await update.message.reply_text("✅ تم دمج الملفات بنجاح.")
         else:
-            await update.message.reply_text("❌ أرسل ملفين PDF على الأقل للدمج")
-    
+            await update.message.reply_text("❌ يجب إرسال ملفين PDF على الأقل ليتم الدمج.")
+            return
+            
+    elif action == 'img2pdf' and 'merge_images' in context.user_data:
+        images = context.user_data['merge_images']
+        if images:
+            await update.message.reply_text("⏳ جاري إنتاج ملف PDF من الصور...")
+            out_pdf = os.path.join(TEMP_DIR, "images_converted.pdf")
+            try:
+                success = await images_to_pdf(images, out_pdf)
+                if success:
+                    with open(out_pdf, 'rb') as f:
+                        await update.message.reply_document(document=f, filename="Images_Report.pdf")
+            finally:
+                for img in images: 
+                    if os.path.exists(img): os.unlink(img)
+                if os.path.exists(out_pdf): os.unlink(out_pdf)
+            await update.message.reply_text("✅ تم تحويل صورك إلى مستند PDF.")
+        else:
+            await update.message.reply_text("❌ لم تقم بإرسال أي صور بعد.")
+            return
+
     elif action == 'merge_img_pdf' and 'pdf_for_merge' in context.user_data:
         pdf_path = context.user_data.pop('pdf_for_merge')
         images = context.user_data.get('merge_images', [])
-        
         if images:
-            with tempfile.TemporaryDirectory() as temp_dir:
-                output_path = os.path.join(temp_dir, "merged_with_images.pdf")
-                await merge_images_with_pdf(pdf_path, images, output_path, 'after')
-                with open(output_path, 'rb') as f:
-                    await update.message.reply_document(document=f, filename="merged_with_images.pdf")
-                await update.message.reply_text(f"✅ تم دمج {len(images)} صورة مع PDF")
-            
-            # تنظيف
-            for img in images:
-                try:
-                    os.unlink(img)
-                except:
-                    pass
-            os.unlink(pdf_path)
-            context.user_data['merge_images'] = []
+            await update.message.reply_text("⏳ جاري دمج الصور الملحقة مع ملف الـ PDF...")
+            out_mixed = os.path.join(TEMP_DIR, "mixed_output.pdf")
+            try:
+                await merge_images_with_pdf(pdf_path, images, out_mixed, 'after')
+                with open(out_mixed, 'rb') as f:
+                    await update.message.reply_document(document=f, filename="Mixed_Document.pdf")
+            finally:
+                for img in images: 
+                    if os.path.exists(img): os.unlink(img)
+                if os.path.exists(pdf_path): os.unlink(pdf_path)
+                if os.path.exists(out_mixed): os.unlink(out_mixed)
+            await update.message.reply_text("✅ تم إلحاق الصور بالملف بنجاح.")
         else:
-            await update.message.reply_text("❌ لم يتم إرسال أي صور")
-    
-    context.user_data['action'] = None
-    await update.message.reply_text("✅ تم الإنهاء")
+            if os.path.exists(pdf_path): os.unlink(pdf_path)
+            await update.message.reply_text("❌ لم يتم إرسال أي صور لدمجها.")
+            return
+
+    context.user_data.clear()
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """معالجة النصوص"""
-    # معالجة التشفير
+    """معالجة الأوامر والمستندات النصية والمدخلات الحرة"""
+    # 1. التشفير بكلمة مرور
     if 'pending_encrypt' in context.user_data:
         pdf_path = context.user_data.pop('pending_encrypt')
         password = update.message.text
-        
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            output_path = tmp.name
-            await encrypt_pdf(pdf_path, output_path, password)
-            with open(output_path, 'rb') as f:
-                await update.message.reply_document(document=f, filename="encrypted.pdf")
-            os.unlink(output_path)
-        
-        os.unlink(pdf_path)
-        await update.message.reply_text("✅ تم تشفير الملف")
-        context.user_data['action'] = None
-    
-    # معالجة تحويل النص إلى PDF
-    elif context.user_data.get('action') == 'text2pdf':
+        await update.message.reply_text("🔒 جاري تشفير الملف وتثبيت الحماية...")
+        out_encrypted = pdf_path + "_secured.pdf"
+        try:
+            await encrypt_pdf(pdf_path, out_encrypted, password)
+            with open(out_encrypted, 'rb') as f:
+                await update.message.reply_document(document=f, filename="Protected_File.pdf")
+        finally:
+            if os.path.exists(pdf_path): os.unlink(pdf_path)
+            if os.path.exists(out_encrypted): os.unlink(out_encrypted)
+        await update.message.reply_text("✅ تم تشفير وقفل المستند بنجاح.")
+        context.user_data.clear()
+        return
+
+    # 2. إعادة ترتيب الصفحات
+    if 'reorder_file' in context.user_data:
+        pdf_path = context.user_data.pop('reorder_file')
+        order_text = update.message.text
+        try:
+            order = [int(x.strip()) for x in order_text.split(',')]
+            await update.message.reply_text("⏳ جاري إعادة فرز وبناء الترتيب الجديد...")
+            out_reordered = pdf_path + "_reorder.pdf"
+            pages_count = await reorder_pdf(pdf_path, out_reordered, order)
+            with open(out_reordered, 'rb') as f:
+                await update.message.reply_document(document=f, filename="Reordered_File.pdf")
+            if os.path.exists(out_reordered): os.unlink(out_reordered)
+            await update.message.reply_text(f"✅ تمت العملية. إجمالي الصفحات المعاد صياغتها: {pages_count}")
+        except Exception as e:
+            await update.message.reply_text("❌ خطأ بالترتيب. يرجى كتابة أرقام صحيحة، مثال: 3,1,2")
+        finally:
+            if os.path.exists(pdf_path): os.unlink(pdf_path)
+        context.user_data.clear()
+        return
+
+    # 3. تحويل النص المباشر لـ PDF
+    if context.user_data.get('action') == 'text2pdf':
         text = update.message.text
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            output_path = tmp.name
-            await text_to_pdf(text, output_path)
-            with open(output_path, 'rb') as f:
-                await update.message.reply_document(document=f, filename="text.pdf")
-            os.unlink(output_path)
-        context.user_data['action'] = None
-        await update.message.reply_text("✅ تم تحويل النص إلى PDF")
-    
-    # معالجة إعادة الترتيب
-    elif 'reorder_file' in context.user_data:
-        await handle_reorder_text(update, context)
+        out_txt_pdf = os.path.join(TEMP_DIR, "text_doc.pdf")
+        await text_to_pdf(text, out_txt_pdf)
+        with open(out_txt_pdf, 'rb') as f:
+            await update.message.reply_document(document=f, filename="Text_Document.pdf")
+        if os.path.exists(out_txt_pdf): os.unlink(out_txt_pdf)
+        await update.message.reply_text("✅ تم تحويل النص المكتوب إلى ملف PDF.")
+        context.user_data.clear()
