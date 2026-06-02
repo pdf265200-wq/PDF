@@ -24,7 +24,7 @@ MAIN_MENU = [
     [InlineKeyboardButton("🔗 دمج PDF", callback_data='merge')],
  #   [InlineKeyboardButton("🖼 دمج صور مع PDF", callback_data='merge_img_pdf')],
     [InlineKeyboardButton("✂️ تقسيم PDF", callback_data='split')],
-    [InlineKeyboardButton("🔄 إعادة ترتيب PDF", callback_data='reorder')],
+    #[InlineKeyboardButton("🔄 إعادة ترتيب PDF", callback_data='reorder')],
    # [InlineKeyboardButton("🗜 ضغط PDF", callback_data='compress')],
   #  [InlineKeyboardButton("📝 استخراج نصوص", callback_data='extract')],
     [InlineKeyboardButton("🔒 تشفير PDF", callback_data='encrypt')],
@@ -44,8 +44,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "✨ *المميزات:*\n"
 
         "• دمج وتقسيم ملفات PDF\n"
-        "• ضغط وتشفير PDF\n"
-        "• معالجة سريعة وآمنة\n\n"
+        "• وتشفير PDF\n"
         "👇 *اختر الخدمة:*",
         reply_markup=InlineKeyboardMarkup(MAIN_MENU),
         parse_mode='Markdown'
