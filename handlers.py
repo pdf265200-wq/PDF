@@ -19,14 +19,14 @@ TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
 # القائمة الرئيسية
 MAIN_MENU = [
-    [InlineKeyboardButton("🖼 صور → PDF", callback_data='img2pdf')],
-    [InlineKeyboardButton("📝 نص → PDF", callback_data='text2pdf')],
+   # [InlineKeyboardButton("🖼 صور → PDF", callback_data='img2pdf')],
+   # [InlineKeyboardButton("📝 نص → PDF", callback_data='text2pdf')],
     [InlineKeyboardButton("🔗 دمج PDF", callback_data='merge')],
-    [InlineKeyboardButton("🖼 دمج صور مع PDF", callback_data='merge_img_pdf')],
+ #   [InlineKeyboardButton("🖼 دمج صور مع PDF", callback_data='merge_img_pdf')],
     [InlineKeyboardButton("✂️ تقسيم PDF", callback_data='split')],
     [InlineKeyboardButton("🔄 إعادة ترتيب PDF", callback_data='reorder')],
     [InlineKeyboardButton("🗜 ضغط PDF", callback_data='compress')],
-    [InlineKeyboardButton("📝 استخراج نصوص", callback_data='extract')],
+  #  [InlineKeyboardButton("📝 استخراج نصوص", callback_data='extract')],
     [InlineKeyboardButton("🔒 تشفير PDF", callback_data='encrypt')],
     [InlineKeyboardButton("ℹ️ معلومات PDF", callback_data='info')],
 ]
@@ -40,12 +40,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await cleanup_user_data(context)
     
     await update.message.reply_text(
-        "🤖 *مرحباً بك في بوت PDF الشامل 2026*\n\n"
+        "🤖 *مرحباً بك في بوت PDF  *\n\n"
         "✨ *المميزات:*\n"
-        "• تحويل الصور والنصوص إلى PDF\n"
+
         "• دمج وتقسيم ملفات PDF\n"
         "• ضغط وتشفير PDF\n"
-        "• استخراج النصوص والصور\n"
         "• معالجة سريعة وآمنة\n\n"
         "👇 *اختر الخدمة:*",
         reply_markup=InlineKeyboardMarkup(MAIN_MENU),
