@@ -3,10 +3,10 @@ import sys
 import logging
 from pathlib import Path
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
-from config import TOKEN, LOG_DIR
-from handlers import start, handle_callback, handle_documents, handle_photos_for_merge, handle_text, handle_done
+from config import TOKEN, LOG_DIR, ENABLE_FORCE_SUBSCRIBE
+from handlers import start, handle_callback, handle_documents, handle_photos_for_merge, handle_text, handle_done, error_handler
+from force_subscribe import handle_subscription_check
 
-# إعداد التسجيل المتقدم
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
@@ -25,8 +25,12 @@ def main():
     
     logger.info("🚀 جاري تشغيل بوت PDF الشامل 2026...")
     
+    if ENABLE_FORCE_SUBSCRIBE:
+        logger.info("🔒 ميزة الاشتراك الإجباري مفعلة - القناة: @BEXO50")
+    else:
+        logger.info("🔓 ميزة الاشتراك الإجباري معطلة")
+    
     try:
-        # بناء التطبيق
         app = Application.builder().token(TOKEN).build()
         
         # إضافة المعالجات
@@ -36,6 +40,9 @@ def main():
         app.add_handler(MessageHandler(filters.PHOTO, handle_photos_for_merge))
         app.add_handler(MessageHandler(filters.Document.ALL, handle_documents))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+        
+        # إضافة معالج الأخطاء
+        app.add_error_handler(error_handler)
         
         logger.info("✅ البوت جاهز للعمل!")
         
